@@ -39,8 +39,26 @@ To maintain consistency and streamline collaboration, we adhere to the following
 ## Getting Started
 
 1. **Clone the Repository**
+
    ```bash
    git clone https://github.com/bokyoung96/Alphawave.git
+   ```
+
+2. **Create Branch**
+
+   ```bash
+   git checkout -b bkchoi/CoinArbitrage
+   ```
+
+3. **Contribute**
+   ```bash
+   git add .
+   ```
+   ```bash
+   git commit -m "FEAT: Create Alphawave"
+   ```
+   ```bash
+   git push -f origin bkchoi/CoinArbitrage
    ```
 
 ## Contact 📬
