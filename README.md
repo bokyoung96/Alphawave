@@ -58,7 +58,7 @@ To maintain consistency and streamline collaboration, we adhere to the following
    git commit -m "FEAT: Create Alphawave"
    ```
    ```bash
-   git push -f origin bkchoi/CoinArbitrage
+   git push origin bkchoi/CoinArbitrage
    ```
 
 ## Contact 📬
