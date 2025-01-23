@@ -1,5 +1,7 @@
 import ccxt
+import multiprocessing
 from enum import Enum, unique
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 @unique
@@ -59,22 +61,36 @@ class ExchangeManager:
         self._initialize_exchanges()
 
     def _initialize_exchanges(self):
-        for conf in self._registry.get_all_configs():
+        def initialize_exchange(conf: CoinConfig):
             exch_name = conf.exchange.value
             stable = conf.stable.value
             rate_limit = conf.rate_limit.value
+
             try:
                 exchange_class = getattr(ccxt, exch_name)
                 exchange = exchange_class({'enableRateLimit': True})
-                exchange.load_markets()
                 exchange.rateLimit = rate_limit
 
-                self._exchanges[exch_name] = exchange
-                print(
-                    f"[ExchangeManager] Initialized exchange: {exch_name} (stable={stable})")
+                return exch_name, exchange, stable
             except Exception as e:
                 print(
                     f"[ExchangeManager] Error initializing {exch_name}: {str(e)}")
+                return None
+
+        futures = []
+        max_workers = min(multiprocessing.cpu_count(),
+                          self._registry.__len__())
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for conf in self._registry.get_all_configs():
+                futures.append(executor.submit(initialize_exchange, conf))
+
+            for f in as_completed(futures):
+                result = f.result()
+                if result is not None:
+                    exch_name, exchange, stable = result
+                    self._exchanges[exch_name] = exchange
+                    print(
+                        f"[ExchangeManager] Initialized exchange: {exch_name} (stable={stable})")
 
     @property
     def exchanges(self):
@@ -87,20 +103,21 @@ class ExchangeManager:
 
 def default_registry():
     registry = CoinRegister()
-    registry.add_config(CoinConfig(Exchanges.HYPERLIQUID,
-                                   Stables.USDC,
-                                   RateLimit.STANDARD))
-    registry.add_config(CoinConfig(Exchanges.BINANCE,
-                                   Stables.USDT,
-                                   RateLimit.STANDARD))
-    registry.add_config(CoinConfig(Exchanges.BYBIT,
-                                   Stables.USDT,
-                                   RateLimit.STANDARD))
-    registry.add_config(CoinConfig(Exchanges.BITGET,
-                                   Stables.USDT,
-                                   RateLimit.STANDARD))
+    registry.add_config(
+        CoinConfig(Exchanges.HYPERLIQUID, Stables.USDC, RateLimit.STANDARD)
+    )
+    registry.add_config(
+        CoinConfig(Exchanges.BINANCE, Stables.USDT, RateLimit.STANDARD)
+    )
+    registry.add_config(
+        CoinConfig(Exchanges.BYBIT, Stables.USDT, RateLimit.STANDARD)
+    )
+    registry.add_config(
+        CoinConfig(Exchanges.BITGET, Stables.USDT, RateLimit.STANDARD)
+    )
     return registry
 
 
 if __name__ == "__main__":
     exch_mgr = ExchangeManager(registry=None)
+    print("Exchanges loaded:", list(exch_mgr.exchanges.keys()))
