@@ -1,6 +1,6 @@
 import pandas as pd
 
-from register import ExchangeManager
+from exchange import ExchangeManager
 from fetcher import FundingRatesFilter, LoadMarketsFilter, BidAskFilter, SnapShotFetcher
 
 

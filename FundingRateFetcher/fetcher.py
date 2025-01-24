@@ -6,7 +6,7 @@ from typing import List, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools import Tools
-from register import ExchangeManager
+from exchange import ExchangeManager
 
 
 class DataFilter(ABC):
