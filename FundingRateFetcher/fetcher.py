@@ -1,98 +1,178 @@
 import multiprocessing
 import pandas as pd
 from tqdm import tqdm
+from abc import ABC, abstractmethod
+from typing import List, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools import Tools
 from register import ExchangeManager
 
-"""
-1. USDT/C both required?
- - If not, parsing will be required before accessing datas.
- 
- 2. Data copy required?
- - Inplace method should be used with caution.
-"""
 
-
-class SnapShotFetcher:
+class DataFilter(ABC):
     def __init__(self, exch_mgr: ExchangeManager):
-        self.mgr = exch_mgr
         self._exchanges = exch_mgr.exchanges
         self._configs = exch_mgr.configs
 
-    @property
-    def max_workers(self):
-        wkrs = min(multiprocessing.cpu_count(),
-                   self._exchanges.__len__())
-        return wkrs
+        self._max_workers = min(
+            multiprocessing.cpu_count(), len(self._exchanges))
 
-    def fetch_raw_snapshots(self) -> dict[str, pd.DataFrame]:
+    @property
+    def max_workers(self) -> int:
+        return self._max_workers
+
+    @abstractmethod
+    def apply(self) -> dict[str, dict]:
+        pass
+
+
+class FundingRatesFilter(DataFilter):
+    def __init__(self, exch_mgr: ExchangeManager):
+        super().__init__(exch_mgr)
+
+    def apply(self) -> dict[str, dict]:
         if not self._exchanges:
             return {}
 
-        def _fetch_snapshot(exch_name: str,
-                            exch) -> pd.DataFrame:
+        def _load_datas(exch_name: str,
+                        exch) -> pd.DataFrame:
             df = pd.DataFrame(exch.fetchFundingRates())
-            return exch_name, df
+            res = {
+                'symbol': df.loc['symbol'],
+                'funding_rate': df.loc['fundingRate'],
+                'fundingTimestamp': df.loc['fundingTimestamp'].apply(Tools.convert_timestamp_to_kst),
+                'index_price': df.loc['indexPrice']
+            }
+            return exch_name, res
 
         snapshot = {}
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
             for exch_name, exchange in self._exchanges.items():
-                fut = executor.submit(_fetch_snapshot,
+                fut = executor.submit(_load_datas,
                                       exch_name,
                                       exchange)
                 futures.append(fut)
 
-            with tqdm(total=futures.__len__(), desc='Fetching snapshots') as pbar:
+            with tqdm(total=futures.__len__(), desc='Fetching funding rates') as pbar:
                 for f in as_completed(futures):
                     exch_name, df_result = f.result()
                     snapshot[exch_name] = df_result
                     pbar.update(1)
         return snapshot
 
-    def get_snapshots(self,
-                      snapshot: dict[str, pd.DataFrame],
-                      base_exch: str = 'hyperliquid') -> dict[str, pd.DataFrame]:
-        if not snapshot.__contains__(base_exch):
-            return snapshot
 
-        base_df = snapshot[base_exch]
-        base_map = base_df.loc['symbol'].apply(Tools.get_base_symbol)
+class LoadMarketsFilter(DataFilter):
+    def __init__(self, exch_mgr: ExchangeManager):
+        super().__init__(exch_mgr)
 
-        def _get_snapshot(exch_name: str,
-                          df: pd.DataFrame,
-                          valid_syms) -> None:
-            syms = df.loc['symbol'].apply(Tools.get_base_symbol)
-            valid_cols = syms[syms.isin(values=valid_syms)].index
-            df.drop(columns=[col for col in df.columns if col not in valid_cols],
-                    inplace=True)
+    def apply(self) -> dict[str, dict]:
+        if not self._exchanges:
+            return {}
 
+        def _load_datas(exch_name: str,
+                        exch) -> pd.DataFrame:
+            temp = pd.DataFrame(exch.loadMarkets())
+            df = temp.loc[:, temp.loc['swap']]
+            res = {
+                'ticker': df.loc['base'],
+                'price_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['price'])),
+                'size_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['amount'])),
+                'max_leverage': df.loc['limits'].apply(lambda limits_dict: limits_dict['leverage']['max']),
+                'taker': df.loc['taker'],
+                'maker': df.loc['maker']
+            }
+            return exch_name, res
+
+        snapshot = {}
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
-            for exch_name, df in snapshot.items():
-                fut = executor.submit(_get_snapshot,
+            for exch_name, exchange in self._exchanges.items():
+                fut = executor.submit(_load_datas,
                                       exch_name,
-                                      df,
-                                      base_map)
+                                      exchange)
+                futures.append(fut)
 
-            for _ in as_completed(futures):
-                pass
+            with tqdm(total=futures.__len__(), desc='Fetching load markets') as pbar:
+                for f in as_completed(futures):
+                    exch_name, df_result = f.result()
+                    snapshot[exch_name] = df_result
+                    pbar.update(1)
         return snapshot
 
-    @property
-    def raw_snapshot(self):
-        return self.fetch_raw_snapshots()
+
+class BidAskFilter(DataFilter):
+    def __init__(self, exch_mgr: ExchangeManager):
+        super().__init__(exch_mgr)
+
+    def apply(self) -> dict[str, dict]:
+        if not self._exchanges:
+            return {}
+
+        def _load_datas(exch_name: str,
+                        exch) -> pd.DataFrame:
+            df = pd.DataFrame(exch.fetchTickers())
+            res = {
+
+            }
+            return exch_name, res
+
+        snapshot = {}
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = []
+            for exch_name, exchange in self._exchanges.items():
+                fut = executor.submit(_load_datas,
+                                      exch_name,
+                                      exchange)
+                futures.append(fut)
+
+            with tqdm(total=futures.__len__(), desc='Fetching bid asks') as pbar:
+                for f in as_completed(futures):
+                    exch_name, df_result = f.result()
+                    snapshot[exch_name] = df_result
+                    pbar.update(1)
+        return snapshot
+
+
+class SnapShotFetcher:
+    def __init__(self):
+        self.steps: List[Tuple[DataFilter, bool]] = []
+        self._filter_history: List = []
+
+    def add_filter(self, flt: DataFilter, enabled: bool = True):
+        self.steps.append((flt, enabled))
+
+    def run(self) -> dict[str, dict]:
+        res = {}
+        for (flt, enabled) in self.steps:
+            filter_name = flt.__class__.__name__
+
+            if not enabled:
+                self._filter_history.append(
+                    (filter_name, "Skipped", None)
+                )
+                continue
+
+            try:
+                snapshot = flt.apply()
+                self._filter_history.append(
+                    (filter_name, "Ran", snapshot)
+                )
+                res[filter_name] = snapshot
+            except Exception as e:
+                self._filter_history.append(
+                    (filter_name, f"Error: {str(e)}", None)
+                )
+        return res
 
     @property
-    def snapshot(self):
-        return self.get_snapshots()
-
-
-if __name__ == "__main__":
-    cls1 = ExchangeManager(registry=None)
-    cls2 = SnapShotFetcher(exch_mgr=cls1)
-    res = cls2.fetch_raw_snapshots()
-    res2 = cls2.get_snapshots(snapshot=res,
-                              base_exch='hyperliquid')
+    def history(self) -> pd.DataFrame:
+        df = []
+        for (fname, status, snapshot) in self._filter_history:
+            snap_str = str(snapshot)[:100] + "..." if snapshot else None
+            df.append({
+                "Filter": fname,
+                "Status": status,
+                "SnapshotPreview": snap_str
+            })
+        return pd.DataFrame(df)

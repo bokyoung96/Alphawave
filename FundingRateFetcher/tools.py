@@ -7,7 +7,7 @@ class Tools:
         pass
 
     @staticmethod
-    def convert_timestamp_to_kst(ts):
+    def convert_timestamp_to_kst(ts) -> str:
         kst = pytz.timezone("Asia/Seoul")
         if not ts:
             return "Unknown"
@@ -17,7 +17,7 @@ class Tools:
 
     @staticmethod
     def convert_precision_to_decimal(prec_val) -> float:
-        return float(f"1e-{prec_val}") if isinstance(prec_val, int) else None
+        return float(f"1e-{prec_val}") if isinstance(prec_val, int) else prec_val
 
     @staticmethod
     def get_base_symbol(symbol: str) -> str:

@@ -116,8 +116,3 @@ def default_registry():
         CoinConfig(Exchanges.BITGET, Stables.USDT, RateLimit.STANDARD)
     )
     return registry
-
-
-if __name__ == "__main__":
-    exch_mgr = ExchangeManager(registry=None)
-    print("Exchanges loaded:", list(exch_mgr.exchanges.keys()))
