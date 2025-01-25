@@ -1,4 +1,5 @@
 import pytz
+import pandas as pd
 from datetime import datetime
 
 
@@ -22,3 +23,16 @@ class Tools:
     @staticmethod
     def get_base_symbol(symbol: str) -> str:
         return symbol.split('/')[0]
+
+    @staticmethod
+    def safe_execute(func, *args, **kwargs) -> pd.DataFrame:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            print(
+                f"[WARNING] Error using args={args}, kwargs={kwargs} - {e}. Retrying without kwargs.")
+            try:
+                return func(*args)
+            except Exception as final_e:
+                raise RuntimeError(
+                    f"Failed to execute function after retry: {final_e}")

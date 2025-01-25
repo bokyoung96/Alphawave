@@ -9,7 +9,7 @@ class PipelineManager:
                  exch_mgr: ExchangeManager,
                  get_fr: bool = True,
                  get_lm: bool = True,
-                 get_ba: bool = False):
+                 get_ba: bool = True):
         self.exch_mgr = exch_mgr
         self.fetcher = SnapShotFetcher()
 
@@ -17,7 +17,7 @@ class PipelineManager:
         self.get_lm = get_lm
         self.get_ba = get_ba
 
-        self.res: dict[str, dict] = None
+        self.res: dict[str, dict[str, dict]] = None
         self.history: pd.DataFrame = None
 
     def run(self):

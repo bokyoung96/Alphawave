@@ -36,7 +36,10 @@ class FundingRatesFilter(DataFilter):
 
         def _load_datas(exch_name: str,
                         exch) -> pd.DataFrame:
-            df = pd.DataFrame(exch.fetchFundingRates())
+            params = {'subtype': 'linear', 'error': 'error'}
+            df = pd.DataFrame(Tools.safe_execute(exch.fetchFundingRates,
+                                                 params=params))
+
             res = {
                 'symbol': df.loc['symbol'],
                 'funding_rate': df.loc['fundingRate'],
@@ -74,6 +77,7 @@ class LoadMarketsFilter(DataFilter):
                         exch) -> pd.DataFrame:
             temp = pd.DataFrame(exch.loadMarkets())
             df = temp.loc[:, temp.loc['swap']]
+
             res = {
                 'ticker': df.loc['base'],
                 'price_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['price'])),
@@ -111,9 +115,15 @@ class BidAskFilter(DataFilter):
 
         def _load_datas(exch_name: str,
                         exch) -> pd.DataFrame:
-            df = pd.DataFrame(exch.fetchTickers())
-            res = {
+            params = {'type': 'swap', 'subtype': 'linear'}
+            df = pd.DataFrame(Tools.safe_execute(exch.fetchTickers,
+                                                 params=params))
 
+            res = {
+                'bid': df.loc['bid'],
+                'ask': df.loc['ask'],
+                'quoteVolume': df.loc['quoteVolume'],
+                'price': df.loc['last']
             }
             return exch_name, res
 
@@ -142,7 +152,7 @@ class SnapShotFetcher:
     def add_filter(self, flt: DataFilter, enabled: bool = True):
         self.steps.append((flt, enabled))
 
-    def run(self) -> dict[str, dict]:
+    def run(self) -> dict[str, dict[str, dict]]:
         res = {}
         for (flt, enabled) in self.steps:
             filter_name = flt.__class__.__name__
