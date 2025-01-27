@@ -41,6 +41,7 @@ class FundingRatesFilter(DataFilter):
                                                  params=params))
 
             res = {
+                'ticker': df.loc['symbol'].apply(Tools.get_base_symbol),
                 'symbol': df.loc['symbol'],
                 'funding_rate': df.loc['fundingRate'],
                 'fundingTimestamp': df.loc['fundingTimestamp'].apply(Tools.convert_timestamp_to_kst),
@@ -120,6 +121,7 @@ class BidAskFilter(DataFilter):
                                                  params=params))
 
             res = {
+                'ticker': df.loc['symbol'].apply(Tools.get_base_symbol),
                 'bid': df.loc['bid'],
                 'ask': df.loc['ask'],
                 'quoteVolume': df.loc['quoteVolume'],
