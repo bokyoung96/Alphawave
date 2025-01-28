@@ -36,3 +36,12 @@ class Tools:
             except Exception as final_e:
                 raise RuntimeError(
                     f"Failed to execute function after retry: {final_e}")
+
+    @staticmethod
+    def filter_symbols(df: pd.DataFrame,
+                       base: str) -> pd.DataFrame:
+        if base not in df.columns:
+            return pd.DataFrame()
+
+        res = df[df[base].notna()]
+        return res
