@@ -36,7 +36,7 @@ class FundingRatesFilter(DataFilter):
 
         def _load_datas(exch_name: str,
                         exch) -> pd.DataFrame:
-            params = {'subtype': 'linear', 'error': 'error'}
+            params = {'subtype': 'linear'}
             df = pd.DataFrame(Tools.safe_execute(exch.fetchFundingRates,
                                                  params=params))
 
@@ -84,6 +84,7 @@ class LoadMarketsFilter(DataFilter):
                 'price_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['price'])),
                 'size_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['amount'])),
                 'max_leverage': df.loc['limits'].apply(lambda limits_dict: limits_dict['leverage']['max']),
+                'min_order_value': df.loc['limits'].apply(lambda limits_dict: limits_dict['cost']['min']),
                 'taker': df.loc['taker'],
                 'maker': df.loc['maker']
             }
@@ -124,6 +125,8 @@ class BidAskFilter(DataFilter):
                 'ticker': df.loc['symbol'].apply(Tools.get_base_symbol),
                 'bid': df.loc['bid'],
                 'ask': df.loc['ask'],
+                'bid_volume': df.loc['bidVolume'],
+                'ask_volume': df.loc['askVolume'],
                 'quoteVolume': df.loc['quoteVolume'],
                 'price': df.loc['last']
             }
