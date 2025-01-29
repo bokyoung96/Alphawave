@@ -23,11 +23,21 @@ class RateLimit(Enum):
     STANDARD = 50
 
 
+@unique
+class DefaultType(Enum):
+    SWAP = "swap"
+
+
 class CoinConfig:
-    def __init__(self, exchange: Exchanges, stable: Stables, rate_limit: RateLimit):
+    def __init__(self,
+                 exchange: Exchanges,
+                 stable: Stables,
+                 rate_limit: RateLimit,
+                 default_type: DefaultType):
         self.exchange = exchange
         self.stable = stable
         self.rate_limit = rate_limit
+        self.default_type = default_type
 
     def __repr__(self):
         return f"<CoinConfig exchange={self.exchange.value}, stable={self.stable.value}, rate_limit={self.rate_limit}>"
@@ -65,13 +75,15 @@ class ExchangeManager:
             exch_name = conf.exchange.value
             stable = conf.stable.value
             rate_limit = conf.rate_limit.value
+            default_type = conf.default_type.value
 
             try:
                 exchange_class = getattr(ccxt, exch_name)
-                exchange = exchange_class({'enableRateLimit': True})
+                exchange = exchange_class({'defaultType': default_type,
+                                           'enableRateLimit': True})
                 exchange.rateLimit = rate_limit
 
-                return exch_name, exchange, stable
+                return exch_name, exchange, stable, default_type
             except Exception as e:
                 print(
                     f"[ExchangeManager] Error initializing {exch_name}: {str(e)}")
@@ -87,10 +99,10 @@ class ExchangeManager:
             for f in as_completed(futures):
                 result = f.result()
                 if result is not None:
-                    exch_name, exchange, stable = result
+                    exch_name, exchange, stable, default_type = result
                     self._exchanges[exch_name] = exchange
                     print(
-                        f"[ExchangeManager] Initialized exchange: {exch_name} (stable={stable})")
+                        f"[ExchangeManager] Initialized exchange: {exch_name} (stable={stable}) (default_type={default_type})")
 
     @property
     def exchanges(self):
@@ -104,15 +116,19 @@ class ExchangeManager:
 def default_registry():
     registry = CoinRegister()
     registry.add_config(
-        CoinConfig(Exchanges.HYPERLIQUID, Stables.USDC, RateLimit.STANDARD)
+        CoinConfig(Exchanges.HYPERLIQUID, Stables.USDC,
+                   RateLimit.STANDARD, DefaultType.SWAP)
     )
     registry.add_config(
-        CoinConfig(Exchanges.BINANCE, Stables.USDT, RateLimit.STANDARD)
+        CoinConfig(Exchanges.BINANCE, Stables.USDT,
+                   RateLimit.STANDARD, DefaultType.SWAP)
     )
     registry.add_config(
-        CoinConfig(Exchanges.BYBIT, Stables.USDT, RateLimit.STANDARD)
+        CoinConfig(Exchanges.BYBIT, Stables.USDT,
+                   RateLimit.STANDARD, DefaultType.SWAP)
     )
     registry.add_config(
-        CoinConfig(Exchanges.BITGET, Stables.USDT, RateLimit.STANDARD)
+        CoinConfig(Exchanges.BITGET, Stables.USDT,
+                   RateLimit.STANDARD, DefaultType.SWAP)
     )
     return registry
