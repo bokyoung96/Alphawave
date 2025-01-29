@@ -62,9 +62,8 @@ class PipelineFinder(PipelineManager):
         inst.run()
         return inst
 
-    def exchange_finder(self,
-                        exch_name: str,
-                        how: str = 'outer') -> pd.DataFrame:
+    def _exchange_finder(self,
+                         exch_name: str) -> pd.DataFrame:
         if not self.pipeline:
             print("No pipeline result found.")
             return {}
@@ -91,18 +90,17 @@ class PipelineFinder(PipelineManager):
             print(f"No data found for exchange: {exch_name}")
             return {}
 
-        temp = reduce(lambda left, right: left.join(right, how=how), dfs)
+        temp = reduce(lambda left, right: left.join(right, how='outer'), dfs)
         res = Tools.filter_symbols(df=temp, base='funding_rate')
         return res
 
-    def multi_exchange_finder(self,
-                              how: str = 'outer') -> dict[str, pd.DataFrame]:
+    def multi_exchange_finder(self) -> dict[str, pd.DataFrame]:
         exch_names = list(self._exchanges.keys())
         res = {}
 
         def _load_datas(exch_name):
-            df_res = self.exchange_finder(exch_name, how=how)
-            return exch_name, df_res
+            df = self._exchange_finder(exch_name)
+            return exch_name, df
 
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = []
@@ -141,6 +139,6 @@ if __name__ == "__main__":
     exch_mgr = ExchangeManager(registry=None)
     finder = PipelineFinder.load_pipeline(exch_mgr=exch_mgr)
 
-    data_map = finder.multi_exchange_finder(how='outer')
+    data_map = finder.multi_exchange_finder()
     res = finder.ticker_finder(data_map=data_map,
                                ticker='ACE')
