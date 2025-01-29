@@ -119,6 +119,43 @@ class PipelineFinder(PipelineManager):
                         pbar.update(1)
         return res
 
+    def funding_rate_finder(self,
+                            data_map: dict[str, pd.DataFrame],
+                            base_exch: str = 'hyperliquid') -> pd.DataFrame:
+        quote_currencies = ['USDT', 'USDC']
+
+        if base_exch not in data_map:
+            print(
+                f"[Error] Base exchange '{base_exch}' not found in data_map.")
+            return pd.DataFrame()
+
+        base = data_map[base_exch]
+        base_tkrs = base.index.unique()
+
+        datas = []
+        for exch, df in data_map.items():
+            temp = df.copy()
+            temp['quote_currency'] = temp['symbol'].apply(
+                lambda x: x.split(':')[-1] if ':' in x else None)
+
+            temp = temp[temp['quote_currency'].isin(quote_currencies)]
+            temp = temp.loc[temp.index.intersection(base_tkrs)]
+
+            temp['exchange'] = exch
+            temp = temp[['exchange', 'quote_currency', 'funding_rate']]
+            datas.append(temp)
+
+        datas = pd.concat(datas)
+        datas.reset_index(drop=False, inplace=True)
+
+        res = datas.pivot_table(
+            index='ticker',
+            columns=['exchange', 'quote_currency'],
+            values='funding_rate',
+            aggfunc='first'
+        )
+        return res
+
     @staticmethod
     def ticker_finder(data_map: dict[str, pd.DataFrame],
                       ticker: str) -> pd.DataFrame:
@@ -137,8 +174,9 @@ class PipelineFinder(PipelineManager):
 
 if __name__ == "__main__":
     exch_mgr = ExchangeManager(registry=None)
-    finder = PipelineFinder.load_pipeline(exch_mgr=exch_mgr)
+    finder = PipelineFinder.load_pipeline(
+        exch_mgr=exch_mgr, get_fr=True, get_lm=False, get_ba=False)
 
     data_map = finder.multi_exchange_finder()
-    res = finder.ticker_finder(data_map=data_map,
-                               ticker='ACE')
+    res = finder.funding_rate_finder(data_map=data_map,
+                                     base_exch='hyperliquid')

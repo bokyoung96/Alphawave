@@ -26,6 +26,7 @@ class RateLimit(Enum):
 @unique
 class DefaultType(Enum):
     SWAP = "swap"
+    FUTURE = "future"
 
 
 class CoinConfig:
