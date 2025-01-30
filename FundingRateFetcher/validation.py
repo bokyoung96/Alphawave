@@ -40,5 +40,5 @@ def validation_fetchBidsAsks(mkt_name):
 
 
 if __name__ == "__main__":
-    mkt_name = 'bybit'
-    loader = validation_fetchTickers(mkt_name=mkt_name)
+    mkt_name = 'bitget'
+    loader = validation_fetchFundingRates(mkt_name=mkt_name)

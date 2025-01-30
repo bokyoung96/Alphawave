@@ -21,10 +21,6 @@ class Tools:
         return float(f"1e-{prec_val}") if isinstance(prec_val, int) else prec_val
 
     @staticmethod
-    def get_base_symbol(symbol: str) -> str:
-        return symbol.split('/')[0]
-
-    @staticmethod
     def safe_execute(func, *args, **kwargs) -> pd.DataFrame:
         try:
             return func(*args, **kwargs)
@@ -36,6 +32,18 @@ class Tools:
             except Exception as final_e:
                 raise RuntimeError(
                     f"Failed to execute function after retry: {final_e}")
+
+    @staticmethod
+    def get_ticker(symbol: str) -> str:
+        return symbol.split('/')[0]
+
+    @staticmethod
+    def get_ticker_with_symbols(df: pd.DataFrame) -> pd.DataFrame:
+        df.reset_index(names='symbol', inplace=True)
+        df['ticker'] = df['symbol'].apply(Tools.get_ticker)
+        df.set_index('ticker', drop=False, inplace=True)
+        df.index.name = 'ticker'
+        return df
 
     @staticmethod
     def filter_symbols(df: pd.DataFrame,
