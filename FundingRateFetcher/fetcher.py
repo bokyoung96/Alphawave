@@ -36,16 +36,15 @@ class FundingRatesFilter(DataFilter):
 
         def _load_datas(exch_name: str,
                         exch) -> pd.DataFrame:
-            params = {'subtype': 'linear'}
+            params = {'type': 'swap'}
             df = pd.DataFrame(Tools.safe_execute(exch.fetchFundingRates,
                                                  params=params))
 
             res = {
-                'ticker': df.loc['symbol'].apply(Tools.get_base_symbol),
-                'symbol': df.loc['symbol'],
                 'funding_rate': df.loc['fundingRate'],
                 'fundingTimestamp': df.loc['fundingTimestamp'].apply(Tools.convert_timestamp_to_kst),
-                'index_price': df.loc['indexPrice']
+                'index_price': df.loc['indexPrice'],
+                'interval': df.loc['interval']
             }
             return exch_name, res
 
@@ -60,8 +59,8 @@ class FundingRatesFilter(DataFilter):
 
             with tqdm(total=futures.__len__(), desc='Fetching funding rates') as pbar:
                 for f in as_completed(futures):
-                    exch_name, df_result = f.result()
-                    snapshot[exch_name] = df_result
+                    exch_name, result_dict = f.result()
+                    snapshot[exch_name] = result_dict
                     pbar.update(1)
         return snapshot
 
@@ -80,7 +79,6 @@ class LoadMarketsFilter(DataFilter):
             df = temp.loc[:, temp.loc['swap']]
 
             res = {
-                'ticker': df.loc['base'],
                 'price_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['price'])),
                 'size_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['amount'])),
                 'max_leverage': df.loc['limits'].apply(lambda limits_dict: limits_dict['leverage']['max']),
@@ -101,8 +99,8 @@ class LoadMarketsFilter(DataFilter):
 
             with tqdm(total=futures.__len__(), desc='Fetching load markets') as pbar:
                 for f in as_completed(futures):
-                    exch_name, df_result = f.result()
-                    snapshot[exch_name] = df_result
+                    exch_name, result_dict = f.result()
+                    snapshot[exch_name] = result_dict
                     pbar.update(1)
         return snapshot
 
@@ -117,12 +115,11 @@ class BidAskFilter(DataFilter):
 
         def _load_datas(exch_name: str,
                         exch) -> pd.DataFrame:
-            params = {'type': 'swap', 'subtype': 'linear'}
+            params = {'type': 'swap'}
             df = pd.DataFrame(Tools.safe_execute(exch.fetchTickers,
                                                  params=params))
 
             res = {
-                'ticker': df.loc['symbol'].apply(Tools.get_base_symbol),
                 'bid': df.loc['bid'],
                 'ask': df.loc['ask'],
                 'bid_volume': df.loc['bidVolume'],
@@ -143,8 +140,8 @@ class BidAskFilter(DataFilter):
 
             with tqdm(total=futures.__len__(), desc='Fetching bid asks') as pbar:
                 for f in as_completed(futures):
-                    exch_name, df_result = f.result()
-                    snapshot[exch_name] = df_result
+                    exch_name, result_dict = f.result()
+                    snapshot[exch_name] = result_dict
                     pbar.update(1)
         return snapshot
 
