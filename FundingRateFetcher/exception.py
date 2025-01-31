@@ -1,6 +1,6 @@
 import pandas as pd
 from tqdm import tqdm
-from typing import NamedTuple, Callable, Any
+from typing import NamedTuple, Callable, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from exchange import ExchangeManager
@@ -12,6 +12,7 @@ class ExceptionRegister(NamedTuple):
     name: str
     func: Callable[[str, Any], tuple[str, dict]]
     target_exchanges: list[str] | None = None
+    target_filter: Optional[str] = None
 
 
 class ExceptionFilter(DataFilter):
@@ -22,17 +23,20 @@ class ExceptionFilter(DataFilter):
             ExceptionRegister(
                 "fetchBidsAsks",
                 self._load_exception_fetchBidsAsks,
-                target_exchanges=["binance"]
+                target_exchanges=["binance"],
+                target_filter='BidAskFilter'
             ),
             ExceptionRegister(
                 "fetchFundingIntervals",
                 self._load_exception_fetchFundingIntervals,
-                target_exchanges=["binance"]
+                target_exchanges=["binance"],
+                target_filter='FundingRatesFilter'
             ),
             ExceptionRegister(
                 "fetchTradingFees",
                 self._load_exception_fetchTradingFees,
-                target_exchanges=["bitget"]
+                target_exchanges=["bitget"],
+                target_filter='FundingRatesFilter'
             ),
         ]
 
@@ -51,7 +55,7 @@ class ExceptionFilter(DataFilter):
         params = {'type': 'swap'}
         df = pd.DataFrame(Tools.safe_execute(
             exch.fetchFundingIntervals, params=params))
-        return exch_name, {'interval': df.loc['interval']}
+        return exch_name, {'interval': df.loc['interval'].apply(Tools.convert_interval_to_float)}
 
     def _load_exception_fetchTradingFees(self, exch_name: str, exch) -> tuple[str, dict]:
         params = {'type': 'swap'}

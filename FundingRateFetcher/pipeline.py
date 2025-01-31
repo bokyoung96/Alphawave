@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tools import Tools
 from exchange import Stables, ExchangeManager
 from fetcher import FundingRatesFilter, LoadMarketsFilter, BidAskFilter, SnapShotFetcher
+from exception import ExceptionFilter
 
 
 class PipelineManager:
@@ -13,7 +14,8 @@ class PipelineManager:
                  exch_mgr: ExchangeManager,
                  get_fr: bool = True,
                  get_lm: bool = True,
-                 get_ba: bool = True):
+                 get_ba: bool = True,
+                 get_ex: bool = True):
         self.exch_mgr = exch_mgr
         self._exchanges = self.exch_mgr.exchanges
         self._configs = self.exch_mgr.configs
@@ -23,6 +25,7 @@ class PipelineManager:
         self.get_fr = get_fr
         self.get_lm = get_lm
         self.get_ba = get_ba
+        self.get_ex = get_ex
 
         self.pipeline: dict[str, dict[str, dict]] = None
         self.history: pd.DataFrame = None
@@ -32,6 +35,7 @@ class PipelineManager:
             (self.get_fr, FundingRatesFilter),
             (self.get_lm, LoadMarketsFilter),
             (self.get_ba, BidAskFilter),
+            (self.get_ex, ExceptionFilter)
         ]
         for enabled, fcls in filters:
             if enabled:
@@ -40,14 +44,51 @@ class PipelineManager:
         self.pipeline = self.fetcher.run()
         self.history = self.fetcher.history
 
+        self._merge_exceptions()
+
+    def _merge_exceptions(self):
+        ex_flt_data = self.pipeline.get("ExceptionFilter")
+        if not ex_flt_data:
+            return
+
+        ex_flt_inst = None
+        for (flt, enabled) in self.fetcher.steps:
+            if isinstance(flt, ExceptionFilter) and enabled:
+                ex_flt_inst = flt
+                break
+
+        if not ex_flt_inst:
+            return
+
+        method_map = {
+            m.name: m.target_filter for m in ex_flt_inst.exception_methods}
+
+        for exch_name, methods_dict in ex_flt_data.items():
+            for method_name, exc_res_dict in methods_dict.items():
+                target_flt_name = method_map.get(method_name)
+                if not target_flt_name:
+                    continue
+
+                target_filter_res = self.pipeline.get(target_flt_name, {})
+                if not target_filter_res:
+                    continue
+
+                main_dict = target_filter_res.get(exch_name, {})
+                if not main_dict:
+                    continue
+
+                Tools.override_if_exists(main_dict=main_dict,
+                                         exc_dict=exc_res_dict)
+
 
 class PipelineFinder(PipelineManager):
     def __init__(self,
                  exch_mgr: ExchangeManager,
                  get_fr: bool = True,
                  get_lm: bool = True,
-                 get_ba: bool = True):
-        super().__init__(exch_mgr, get_fr, get_lm, get_ba)
+                 get_ba: bool = True,
+                 get_ex: bool = True):
+        super().__init__(exch_mgr, get_fr, get_lm, get_ba, get_ex)
         self._max_workers = min(
             multiprocessing.cpu_count(), len(self._exchanges))
         self.data_map = None
@@ -57,8 +98,9 @@ class PipelineFinder(PipelineManager):
                       exch_mgr: ExchangeManager,
                       get_fr: bool = True,
                       get_lm: bool = True,
-                      get_ba: bool = True):
-        inst = cls(exch_mgr, get_fr, get_lm, get_ba)
+                      get_ba: bool = True,
+                      get_ex: bool = True):
+        inst = cls(exch_mgr, get_fr, get_lm, get_ba, get_ex)
         inst.run()
         inst.data_map = inst.multi_exchange_finder()
         return inst
@@ -69,8 +111,14 @@ class PipelineFinder(PipelineManager):
             print("No pipeline result found.")
             return {}
 
+        flt_pipeline = {
+            filter_name: exch_dict
+            for filter_name, exch_dict in self.pipeline.items()
+            if filter_name != "ExceptionFilter"
+        }
+
         dfs = []
-        for filter_name, exch_dict in self.pipeline.items():
+        for filter_name, exch_dict in flt_pipeline.items():
             data: dict = exch_dict.get(exch_name)
 
             if not data:
@@ -177,6 +225,8 @@ class PipelineFinder(PipelineManager):
 
 if __name__ == "__main__":
     exch_mgr = ExchangeManager(registry=None)
+    pipeline = PipelineManager(exch_mgr=exch_mgr)
+
     finder = PipelineFinder.load_pipeline(
         exch_mgr=exch_mgr, get_fr=True, get_lm=True, get_ba=True)
 
