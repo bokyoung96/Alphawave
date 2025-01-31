@@ -44,7 +44,7 @@ class FundingRatesFilter(DataFilter):
                 'funding_rate': df.loc['fundingRate'],
                 'fundingTimestamp': df.loc['fundingTimestamp'].apply(Tools.convert_timestamp_to_kst),
                 'index_price': df.loc['indexPrice'],
-                'interval': df.loc['interval']
+                'interval': df.loc['interval'].apply(Tools.convert_interval_to_float)
             }
             return exch_name, res
 

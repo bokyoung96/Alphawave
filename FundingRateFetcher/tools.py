@@ -1,3 +1,5 @@
+import re
+import math
 import pytz
 import pandas as pd
 from datetime import datetime
@@ -21,6 +23,18 @@ class Tools:
         return float(f"1e-{prec_val}") if isinstance(prec_val, int) else prec_val
 
     @staticmethod
+    def convert_interval_to_float(interval: str) -> float | None:
+        if interval is None or (isinstance(interval, float) and math.isnan(interval)):
+            return None
+
+        interval_str = str(interval)
+
+        match = re.findall(r"\d+", interval_str)
+        if not match:
+            return None
+        return float(match[0])
+
+    @staticmethod
     def safe_execute(func, *args, **kwargs) -> pd.DataFrame:
         try:
             return func(*args, **kwargs)
@@ -32,6 +46,12 @@ class Tools:
             except Exception as final_e:
                 raise RuntimeError(
                     f"Failed to execute function after retry: {final_e}")
+
+    @staticmethod
+    def override_if_exists(main_dict: dict, exc_dict: dict):
+        for key, exc_val in exc_dict.items():
+            if key in main_dict:
+                main_dict[key] = exc_val
 
     @staticmethod
     def get_ticker(symbol: str) -> str:
