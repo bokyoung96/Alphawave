@@ -97,10 +97,3 @@ class ExceptionFilter(DataFilter):
                     pbar.update(1)
 
         return snapshot
-
-
-if __name__ == "__main__":
-    exch_mgr = ExchangeManager(registry=None)
-    cls1 = ExceptionFilter(exch_mgr=exch_mgr)
-    res = cls1.apply()
-    print(res)

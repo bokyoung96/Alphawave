@@ -222,6 +222,32 @@ class PipelineFinder(PipelineManager):
         res = pd.concat(datas, names=['exchange', 'ticker'])
         return res
 
+    def merged_finder(self,
+                      base_exch: str = 'hyperliquid') -> pd.DataFrame:
+        # TODO: MultiIndex base should be re-allocated.
+        if base_exch not in self.data_map:
+            print(
+                f"[Error] Base exchange '{base_exch}' not found in data_map.")
+            return pd.DataFrame()
+
+        base = self.data_map[base_exch]
+        base_tkrs = base.index.unique()
+        dfs = []
+
+        for exch, df in self.data_map.items():
+            temp = df.copy()
+            temp = temp.loc[temp.index.intersection(base_tkrs)]
+            temp.columns = pd.MultiIndex.from_product([[exch], temp.columns])
+            dfs.append(temp)
+
+        if not dfs:
+            print(
+                f"[Error] No data found for merging using base exchange: {base_exch}")
+            return pd.DataFrame()
+
+        res = pd.concat(dfs, axis=0)
+        return res
+
 
 if __name__ == "__main__":
     exch_mgr = ExchangeManager(registry=None)
@@ -230,4 +256,4 @@ if __name__ == "__main__":
     finder = PipelineFinder.load_pipeline(
         exch_mgr=exch_mgr, get_fr=True, get_lm=True, get_ba=True)
 
-    res = finder.funding_rate_finder(base_exch='hyperliquid')
+    res = finder.merged_finder(base_exch='hyperliquid')
