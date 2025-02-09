@@ -34,13 +34,8 @@ class Main:
             "Initializing ExchangeManager with registry: %s", self.registry)
         self.exch_mgr = ExchangeManager(registry=self.registry)
 
-        logging.debug(
-            "Loading PipelineFinder with filters: get_fr=%s, get_lm=%s, get_ba=%s, get_ex=%s",
-            self.get_fr,
-            self.get_lm,
-            self.get_ba,
-            self.get_ex,
-        )
+        logging.debug("Loading PipelineFinder with filters: get_fr=%s, get_lm=%s, get_ba=%s, get_ex=%s",
+                      self.get_fr, self.get_lm, self.get_ba, self.get_ex)
         self.pipeline_finder = PipelineFinder.load_pipeline(
             exch_mgr=self.exch_mgr,
             get_fr=self.get_fr,
@@ -92,44 +87,54 @@ class Main:
 
         return df
 
-    def show_merged_data(self, base_exch: Optional[str] = None) -> pd.DataFrame:
+    def show_funding_table(self,
+                           base_exch: Optional[str] = None,
+                           hours_ahead: int = 8,
+                           tolerance_minutes: int = 30) -> pd.DataFrame:
         """
-        Displays merged data (all columns) across exchanges based on the provided or default base exchange.
+        Displays the Funding Table pivot based on the provided or default base exchange.
+        This table is built using funding_table_finder and includes extra funding rate records
+        according to their interval.
 
-        :param base_exch: The base exchange name to use as reference.
-                          If not provided, defaults to self.exch_name.
-        :return: A pandas DataFrame with merged data from all exchanges.
+        :param base_exch: The base exchange name to use. If not provided, defaults to self.exch_name.
+        :param hours_ahead: Number of future time slots (hours) to include.
+        :param tolerance_minutes: Tolerance in minutes for matching fundingTimestamp to time slot.
+        :return: A pandas DataFrame containing the funding table with a multi-index.
         """
         base_exch = base_exch or self.exch_name
-
-        logging.info("Retrieving merged data for base exchange: %s", base_exch)
-        merged_df = self.pipeline_finder.merged_data_finder(
-            base_exch=base_exch)
-
-        if merged_df.empty:
+        logging.info(
+            "Retrieving Funding Table for base exchange: %s", base_exch)
+        table_df = self.pipeline_finder.funding_table_finder(
+            base_exch=base_exch,
+            hours_ahead=hours_ahead,
+            tolerance_minutes=tolerance_minutes
+        )
+        if table_df.empty:
             logging.warning(
-                "No merged data found for exchange: '%s'.", base_exch)
+                "No Funding Table data found for exchange: '%s'.", base_exch)
         else:
-            logging.debug("Merged data:\n%s", merged_df)
+            logging.debug("Funding Table data:\n%s", table_df)
+        return table_df
 
-        return merged_df
-
-    def run(self, show_fr: bool = False, ticker: Optional[str] = None, show_merged: bool = False) -> None:
+    def run(self,
+            show_fr: bool = False,
+            ticker: Optional[str] = None,
+            show_table: bool = False) -> None:
         """
-        Main runner method, which can optionally show funding rates, merged data,
-        and/or query a specific ticker. Extend this method to perform other actions.
+        Main runner method, which can optionally show funding rates, ticker info,
+        and the funding table. Extend this method to perform other actions.
 
         :param show_fr: If True, display the funding rates pivot table.
         :param ticker: If provided, display the ticker info.
-        :param show_merged: If True, display the merged data (all columns) based on the base exchange.
+        :param show_table: If True, display the funding table.
         """
         logging.info("Starting Main execution.")
         if show_fr:
             self.show_funding_rates()
         if ticker:
             self.show_ticker_info(ticker)
-        if show_merged:
-            self.show_merged_data()
+        if show_table:
+            self.show_funding_table()
         logging.info("Main execution completed.")
 
 
@@ -180,9 +185,9 @@ def parse_cli_args() -> argparse.Namespace:
         help="Display data for a specific ticker (e.g. BTC/USDT)",
     )
     parser.add_argument(
-        "--show_merged",
+        "--show_table",
         action="store_true",
-        help="Display merged data (all columns) based on the base exchange",
+        help="Display Funding Table after pipeline run",
     )
     parser.add_argument(
         "--verbose",
@@ -202,7 +207,7 @@ def run_from_cli(args: argparse.Namespace) -> None:
         registry=None,
     )
     app.run(show_fr=args.show_fr, ticker=args.ticker,
-            show_merged=args.show_merged)
+            show_table=args.show_table)
 
 
 def run_from_interactive(**kwargs) -> Main:
@@ -221,3 +226,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # res = run_from_interactive(exch_name="hyperliquid",
+    #                            get_fr=True,
+    #                            get_lm=True,
+    #                            get_ba=True,
+    #                            get_ex=True,
+    #                            registry=None)
