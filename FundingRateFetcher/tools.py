@@ -16,7 +16,7 @@ class Tools:
             return "Unknown"
         dt = datetime.fromtimestamp(
             ts / 1000, tz=pytz.utc).astimezone(kst)
-        return dt.strftime("%m-%d %H:%M")
+        return dt
 
     @staticmethod
     def convert_precision_to_decimal(prec_val) -> float:

@@ -1,3 +1,5 @@
+import pytz
+import numpy as np
 import pandas as pd
 import multiprocessing
 from tqdm import tqdm
@@ -222,30 +224,105 @@ class PipelineFinder(PipelineManager):
         res = pd.concat(datas, names=['exchange', 'ticker'])
         return res
 
-    def merged_finder(self,
-                      base_exch: str = 'hyperliquid') -> pd.DataFrame:
-        # TODO: MultiIndex base should be re-allocated.
+    def funding_table_finder(self,
+                             base_exch: str = 'hyperliquid',
+                             hours_ahead: int = 8,
+                             tolerance_minutes: int = 30) -> pd.DataFrame:
+        records = []
         if base_exch not in self.data_map:
-            print(
-                f"[Error] Base exchange '{base_exch}' not found in data_map.")
-            return pd.DataFrame()
+            raise ValueError(
+                f"Base exchange '{base_exch}' not found in data_map.")
+        base_tickers = self.data_map[base_exch]['ticker'].unique()
 
-        base = self.data_map[base_exch]
-        base_tkrs = base.index.unique()
-        dfs = []
+        tz = pytz.timezone('Asia/Seoul')
+        now = pd.Timestamp.now(tz=tz)
+        try:
+            next_hour = now.ceil("h")
+        except Exception:
+            next_hour = now.replace(minute=0, second=0, microsecond=0)
+            if now != next_hour:
+                next_hour += pd.Timedelta(hours=1)
+        slots = [next_hour + pd.Timedelta(hours=h) for h in range(hours_ahead)]
 
         for exch, df in self.data_map.items():
-            temp = df.copy()
-            temp = temp.loc[temp.index.intersection(base_tkrs)]
-            temp.columns = pd.MultiIndex.from_product([[exch], temp.columns])
-            dfs.append(temp)
+            if 'quote_currency' not in df.columns:
+                df['quote_currency'] = df['symbol'].apply(
+                    lambda s: s.split(':')[-1].strip().upper() if isinstance(s, str) and ':' in s else np.nan)
+            for _, row in df.iterrows():
+                ticker = row.get('ticker')
+                if ticker not in base_tickers:
+                    continue
+                try:
+                    ts = pd.to_datetime(row['fundingTimestamp'])
+                except Exception:
+                    continue
+                if pd.isna(ts):
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(tz)
+                else:
+                    ts = ts.tz_convert(tz)
 
-        if not dfs:
-            print(
-                f"[Error] No data found for merging using base exchange: {base_exch}")
-            return pd.DataFrame()
+                diffs = [abs(ts - slot) for slot in slots]
+                min_diff = min(diffs)
+                if min_diff <= pd.Timedelta(minutes=tolerance_minutes):
+                    closest_slot = slots[diffs.index(min_diff)]
+                else:
+                    continue
+                quote = row.get('quote_currency')
+                if pd.isna(quote):
+                    continue
+                quote = str(quote).upper().strip()
 
-        res = pd.concat(dfs, axis=0)
+                record = {
+                    'time_slot': closest_slot,
+                    'ticker': ticker,
+                    'quote_currency': quote,
+                    'exchange': exch,
+                    'funding_rate': row.get('funding_rate'),
+                    'order': 0
+                }
+                records.append(record)
+
+                if 'interval' in row and not pd.isna(row['interval']):
+                    try:
+                        interval_hours = float(row['interval'])
+                    except Exception:
+                        interval_hours = None
+                    if interval_hours is not None:
+                        k = 1
+                        while True:
+                            extra_slot = closest_slot + \
+                                pd.Timedelta(hours=k * interval_hours)
+                            if extra_slot in slots:
+                                extra_record = {
+                                    'time_slot': extra_slot,
+                                    'ticker': ticker,
+                                    'quote_currency': quote,
+                                    'exchange': exch,
+                                    'funding_rate': row.get('funding_rate'),
+                                    'order': 1
+                                }
+                                records.append(extra_record)
+                                k += 1
+                            else:
+                                break
+
+        if not records:
+            empty_index = pd.DatetimeIndex(slots, name='time_slot')
+            return pd.DataFrame(index=empty_index)
+
+        rec_df = pd.DataFrame(records)
+        rec_df.sort_values(
+            by=['time_slot', 'ticker', 'quote_currency', 'exchange', 'order'], inplace=True)
+
+        res = rec_df.pivot_table(index='time_slot',
+                                 columns=[
+                                       'ticker', 'quote_currency', 'exchange'],
+                                 values='funding_rate',
+                                 aggfunc='first')
+        res = res.sort_index(axis=1, level=[0, 1, 2])
+        res = res.reindex(slots)
         return res
 
 
@@ -256,4 +333,6 @@ if __name__ == "__main__":
     finder = PipelineFinder.load_pipeline(
         exch_mgr=exch_mgr, get_fr=True, get_lm=True, get_ba=True)
 
-    res = finder.merged_finder(base_exch='hyperliquid')
+    res = finder.funding_table_finder(base_exch='hyperliquid',
+                                      hours_ahead=8,
+                                      tolerance_minutes=30)
