@@ -1,3 +1,6 @@
+# Ignore config
+/FundingRateFetcher/config.json
+
 # Ignore DS_Store
 .DS_Store
 ._.DS_Store
