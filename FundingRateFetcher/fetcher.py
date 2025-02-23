@@ -79,6 +79,9 @@ class LoadMarketsFilter(DataFilter):
             df = temp.loc[:, temp.loc['swap']]
 
             res = {
+                'active': df.loc['active'],
+                'settle': df.loc['settle'],
+                'linear': df.loc['linear'],
                 'price_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['price'])),
                 'size_decimal': df.loc['precision'].apply(lambda prec_dict: Tools.convert_precision_to_decimal(prec_dict['amount'])),
                 'max_leverage': df.loc['limits'].apply(lambda limits_dict: limits_dict['leverage']['max']),
