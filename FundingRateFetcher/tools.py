@@ -31,14 +31,26 @@ class Tools:
             return None
 
         try:
-            return float(interval)
+            value = float(interval)
+            if value >= 3600:
+                hours = value / 3600
+                if hours == int(hours):
+                    return int(hours)
+                return hours
+            return value
         except (ValueError, TypeError):
             pass
 
         interval_str = str(interval)
         match = re.search(r"\d+(\.\d+)?", interval_str)
         if match:
-            return float(match.group(0))
+            value = float(match.group(0))
+            if value >= 3600:
+                hours = value / 3600
+                if hours == int(hours):
+                    return int(hours)
+                return hours
+            return value
         return None
 
     @staticmethod

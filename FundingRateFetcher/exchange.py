@@ -19,6 +19,7 @@ class Exchanges(Enum):
     BINANCE = "binance"
     BYBIT = "bybit"
     BITGET = "bitget"
+    GATEIO = "gateio"
 
 
 @unique
@@ -105,4 +106,5 @@ def default_registry() -> CoinRegister:
     registry.add_config(CoinConfig(Exchanges.BINANCE, DefaultType.SWAP))
     registry.add_config(CoinConfig(Exchanges.BYBIT, DefaultType.SWAP))
     registry.add_config(CoinConfig(Exchanges.BITGET, DefaultType.SWAP))
+    registry.add_config(CoinConfig(Exchanges.GATEIO, DefaultType.SWAP))
     return registry
