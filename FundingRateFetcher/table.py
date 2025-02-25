@@ -77,7 +77,8 @@ class TableViewer:
         df.index.set_names(['exchange', 'ticker', 'settle'], inplace=True)
         df = df[['symbol',
                  'funding_rate', 'interval',
-                 'bid', 'ask', 'quoteVolume']]
+                 'bid', 'ask', 'quoteVolume',
+                 'taker', 'maker']]
 
         convert_rates = self._get_convert_rates()
 
