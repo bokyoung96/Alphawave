@@ -3,6 +3,7 @@ import logging
 import warnings
 import numpy as np
 import pandas as pd
+from itertools import permutations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools import Tools
@@ -193,6 +194,41 @@ class TableViewer:
             table = table.loc[:, table.columns.get_level_values(0).isin(valid)]
         return table
 
+    def get_pair_table(self,
+                       hours_ahead: int = 8,
+                       tolerance_minutes: int = 5) -> pd.DataFrame:
+        table = self.get_funding_table(hours_ahead=hours_ahead,
+                                       tolerance_minutes=tolerance_minutes)
+        if table.empty:
+            logger.warning("No funding table found.")
+            return
+
+        stacked = table.stack(level=[0, 1, 2]).rename(
+            'funding_rate').reset_index()
+        stacked.columns = ['time', 'ticker',
+                           'settle', 'exchange', 'funding_rate']
+
+        res = []
+        for (t, tkr), grp in stacked.groupby(['time', 'ticker']):
+            if grp.__len__() < 2:
+                continue
+
+            rows = list(grp[['settle', 'exchange', 'funding_rate']].itertuples(index=False,
+                                                                               name=None))
+            for (sttl1, exch1, fr1), (sttl2, exch2, fr2) in permutations(rows, 2):
+                if pd.isna(fr1) and pd.isna(fr2):
+                    continue
+
+                diff = fr1 - fr2
+                res.append((t, tkr, sttl1, sttl2, exch1, exch2, diff))
+
+        df = pd.DataFrame(res,
+                          columns=['time', 'ticker',
+                                   'sttl1', 'sttl2',
+                                   'exch1', 'exch2',
+                                   'diff'])
+        return df
+
 
 # if __name__ == "__main__":
 #     viewer = TableViewer.default_viewer(base_exch='hyperliquid',
@@ -200,3 +236,5 @@ class TableViewer:
 #     funding_table = viewer.get_funding_table(hours_ahead=8,
 #                                              tolerance_minutes=5)
 #     info_table = viewer.get_info_table()
+#     pair_table = viewer.get_pair_table(hours_ahead=8,
+#                                        tolerance_minutes=5)
