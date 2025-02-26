@@ -1,3 +1,4 @@
+from typing import Optional
 import re
 import math
 import pytz
@@ -5,6 +6,8 @@ import logging
 import pandas as pd
 from datetime import datetime
 
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s - %(filename)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +29,7 @@ class Tools:
         return float(f"1e-{prec_val}") if isinstance(prec_val, int) else prec_val
 
     @staticmethod
-    def convert_interval_to_float(interval: str) -> float | None:
+    def convert_interval_to_float(interval: str) -> Optional[float]:
         if interval is None:
             return None
 
@@ -83,9 +86,41 @@ class Tools:
     @staticmethod
     def get_ticker(df: pd.DataFrame) -> pd.DataFrame:
         df.reset_index(names='symbol', inplace=True)
-        df['ticker'] = df['symbol'].apply(lambda symbol: symbol.split('/')[0])
+        df['ticker_prev'] = df['symbol'].apply(
+            lambda symbol: symbol.split('/')[0])
+        df['ticker'] = df['ticker_prev'].copy()
         df.set_index('ticker', drop=False, inplace=True)
         df.index.name = 'ticker'
+        return df
+
+    @staticmethod
+    def adjust_numerical_ticker(df: pd.DataFrame) -> pd.DataFrame:
+        logger.info("Adjusting numerical tickers.")
+        try:
+            pattern = r'^(\d+)([A-Za-z]+)$'
+            extracted = df['ticker'].str.extract(pattern)
+
+            df['prefix'] = pd.to_numeric(extracted[0], errors='coerce')
+            df['suffix'] = extracted[1]
+
+            mask = df['prefix'] >= 10
+            df.loc[mask, 'ticker'] = df.loc[mask, 'suffix']
+
+            for col in ['bid', 'ask', 'price']:
+                if col in df.columns:
+                    try:
+                        df.loc[mask, col] = df.loc[mask, col] / \
+                            df.loc[mask, 'prefix']
+                    except Exception as e:
+                        logger.error(f"Error adjusting column '{col}': {e}")
+
+            df.drop(columns=['prefix', 'suffix'], inplace=True)
+            df.set_index('ticker', drop=False, inplace=True)
+            df.index.name = 'ticker'
+
+        except Exception as e:
+            logger.error(f"Unexpected error in adjust_numerical_ticker: {e}")
+            raise
         return df
 
     @staticmethod
