@@ -12,7 +12,7 @@ from fetcher import FundingRatesFilter, LoadMarketsFilter, BidAskFilter, SnapSho
 from exception import ExceptionFilter
 
 logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+                    format="%(asctime)s - %(filename)s - %(levelname)s - %(message)s")
 
 
 class PipelineManager:
@@ -145,6 +145,7 @@ class PipelineMerger(PipelineManager):
 
         temp = pd.concat(dfs, axis=1)
         temp = Tools.get_ticker(df=temp)
+        temp = Tools.adjust_numerical_ticker(df=temp)
         res = Tools.filter_data_map(df=temp, base='funding_rate')
         return res
 
