@@ -57,6 +57,9 @@ def run_terminal():
     if args.fund:
         print("=== Funding Table ===")
         print(viewer.get_funding_table(hours_ahead=8, tolerance_minutes=30))
+    if args.pair:
+        print("=== Pair Table ===")
+        print(viewer.get_pair_table(hours_ahead=8, tolerance_minutes=30))
     if args.ticker:
         print(f"=== Ticker Finder for {args.ticker} ===")
         print(pipeline.ticker_finder(args.ticker))
@@ -84,3 +87,7 @@ if __name__ == "__main__":
     print(viewer.get_info_table())
     print("=== Funding Table ===")
     print(viewer.get_funding_table(hours_ahead=8, tolerance_minutes=30))
+    # print("=== Pair Table ===")
+    # print(viewer.get_pair_table(hours_ahead=8, tolerance_minutes=30))
+
+    df = viewer.get_pair_table(hours_ahead=8, tolerance_minutes=30)
