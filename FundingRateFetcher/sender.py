@@ -93,6 +93,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/fund - Show funding table\n"
         "/update - Manually re-load data\n"
         "/help - Show usage instructions\n"
+        "/table - Show table\n\n"
         "(All messages will be sent to this group.)"
     )
     await context.bot.send_message(
@@ -119,7 +120,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     viewer: TableViewer = context.bot_data["viewer"]
-    df = viewer.get_info_table()
+    df = viewer.get_info_table
     table_str = df.to_markdown(index=True, tablefmt="pipe")
     escaped_str = html.escape(table_str)
     for chunk in chunk_text(escaped_str, 3000):
@@ -151,6 +152,20 @@ async def cmd_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    viewer = create_viewer()
+    df = viewer.get_table.head(10)
+    table_str = df.to_markdown(index=True, tablefmt="pipe")
+    escaped_str = html.escape(table_str)
+    for chunk in chunk_text(escaped_str, 3000):
+        msg = f"<pre>{chunk}</pre>"
+        await context.bot.send_message(
+            chat_id=alphawave_group_chat_id,
+            text=msg,
+            parse_mode="HTML"
+        )
+
+
 def main():
     viewer = create_viewer()
     application = ApplicationBuilder().token(alphawave_bot).build()
@@ -159,6 +174,7 @@ def main():
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("info", cmd_info))
     application.add_handler(CommandHandler("fund", cmd_fund))
+    application.add_handler(CommandHandler("table", cmd_table))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("update", cmd_update))
 

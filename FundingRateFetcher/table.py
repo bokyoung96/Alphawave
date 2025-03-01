@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from itertools import permutations
+from functools import cached_property
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tools import Tools
@@ -72,6 +73,7 @@ class TableViewer:
                 snapshot[exch_name] = result_dict
         return snapshot
 
+    @cached_property
     def get_info_table(self) -> pd.DataFrame:
         df = pd.concat(self.data_map, names=['exchange'], axis=0)
         df.set_index('settle', append=True, inplace=True)
@@ -79,7 +81,8 @@ class TableViewer:
         df = df[['symbol',
                  'funding_rate', 'interval',
                  'bid', 'ask', 'quoteVolume',
-                 'taker', 'maker']]
+                 'taker', 'maker',
+                 'fundingTimestamp']]
 
         convert_rates = self._get_convert_rates()
 
@@ -195,39 +198,162 @@ class TableViewer:
         return table
 
     def get_pair_table(self,
-                       hours_ahead: int = 8,
-                       tolerance_minutes: int = 5) -> pd.DataFrame:
-        table = self.get_funding_table(hours_ahead=hours_ahead,
-                                       tolerance_minutes=tolerance_minutes)
-        if table.empty:
-            logger.warning("No funding table found.")
-            return
+                       interval_equals: bool = True,
+                       pos_exists: bool = True,
+                       fr_mgmt: bool = True) -> pd.DataFrame:
+        infos = self.get_info_table.reset_index()
+        if infos.empty:
+            return pd.DataFrame()
 
-        stacked = table.stack(level=[0, 1, 2]).rename(
-            'funding_rate').reset_index()
-        stacked.columns = ['time', 'ticker',
-                           'settle', 'exchange', 'funding_rate']
+        def get_pair(row1: dict, row2: dict, ticker: str) -> dict | None:
+            if interval_equals and row1.get('interval') != row2.get('interval'):
+                return None
+            if not row1.get('interval') or not row2.get('interval'):
+                return None
 
-        res = []
-        for (t, tkr), grp in stacked.groupby(['time', 'ticker']):
-            if grp.__len__() < 2:
+            try:
+                # NOTE: Scale funding rate to 8 hours
+                fr1 = row1['funding_rate'] * (8 / row1['interval'])
+                fr2 = row2['funding_rate'] * (8 / row2['interval'])
+            except Exception:
+                return None
+
+            diff = fr1 - fr2
+
+            if diff > 0:
+                pos1, pos2 = 'S', 'L'
+            elif diff < 0:
+                pos1, pos2 = 'L', 'S'
+            else:
+                pos1, pos2 = None, None
+
+            if pos_exists and (pos1 is None or pos2 is None):
+                return None
+
+            return {
+                'ticker': ticker,
+                'exch1': row1.get('exchange'),
+                'exch2': row2.get('exchange'),
+                'time1': row1.get('fundingTimestamp'),
+                'time2': row2.get('fundingTimestamp'),
+                'fr1': row1.get('funding_rate'),
+                'fr2': row2.get('funding_rate'),
+                'interval1': row1.get('interval'),
+                'interval2': row2.get('interval'),
+                'bid1': row1.get('bid'),
+                'bid2': row2.get('bid'),
+                'ask1': row1.get('ask'),
+                'ask2': row2.get('ask'),
+                'maker1': row1.get('maker'),
+                'maker2': row2.get('maker'),
+                'taker1': row1.get('taker'),
+                'taker2': row2.get('taker'),
+                'diff': diff,
+                'pos1': pos1,
+                'pos2': pos2,
+            }
+
+        records = []
+        for ticker, group in infos.groupby('ticker'):
+            if len(group) < 2:
                 continue
 
-            rows = list(grp[['settle', 'exchange', 'funding_rate']].itertuples(index=False,
-                                                                               name=None))
-            for (sttl1, exch1, fr1), (sttl2, exch2, fr2) in permutations(rows, 2):
-                if pd.isna(fr1) and pd.isna(fr2):
-                    continue
+            rows = group.to_dict('records')
+            for row1, row2 in permutations(rows, 2):
+                record = get_pair(row1, row2, ticker)
+                if record is not None:
+                    records.append(record)
 
-                diff = fr1 - fr2
-                res.append((t, tkr, sttl1, sttl2, exch1, exch2, diff))
+        temp = pd.DataFrame(records)
+        if not temp.empty:
+            temp['diff'] = temp['diff'].round(6)
 
-        df = pd.DataFrame(res,
-                          columns=['time', 'ticker',
-                                   'sttl1', 'sttl2',
-                                   'exch1', 'exch2',
-                                   'diff'])
-        return df
+        pairs = temp[temp['diff'] < 0].sort_values(
+            by='diff', ascending=True) if fr_mgmt else temp
+
+        pis = []
+        for _, row in pairs.iterrows():
+            if row['pos1'] == 'L':
+                long_leg = {'bid': row['bid1'], 'ask': row['ask1'],
+                            'maker': row['maker1'], 'taker': row['taker1']}
+                short_leg = {'bid': row['bid2'], 'ask': row['ask2'],
+                             'maker': row['maker2'], 'taker': row['taker2']}
+
+            elif row['pos2'] == 'L':
+                long_leg = {'bid': row['bid2'], 'ask': row['ask2'],
+                            'maker': row['maker2'], 'taker': row['taker2']}
+                short_leg = {'bid': row['bid1'], 'ask': row['ask1'],
+                             'maker': row['maker1'], 'taker': row['taker1']}
+
+            else:
+                continue
+
+            # NOTE: Long maker, Short taker (LmSt)
+            try:
+                eff_l_bid = long_leg['bid'] * (1 + long_leg['maker'])
+                eff_s_bid = short_leg['bid'] * (1 + short_leg['taker'])
+                pi_bid = (eff_s_bid - eff_l_bid) / eff_l_bid
+            except Exception:
+                pi_bid = np.nan
+            row_bid = row.copy()
+            row_bid['tm'] = 'LmSt'
+            row_bid['pi'] = pi_bid
+
+            # NOTE: Long taker, Short maker (LtSm)
+            try:
+                eff_l_ask = long_leg['ask'] * (1 + long_leg['taker'])
+                eff_s_ask = short_leg['ask'] * (1 + short_leg['maker'])
+                pi_ask = (eff_s_ask - eff_l_ask) / eff_l_ask
+            except Exception:
+                pi_ask = np.nan
+            row_ask = row.copy()
+            row_ask['tm'] = 'LtSm'
+            row_ask['pi'] = pi_ask
+
+            pis.append(row_bid)
+            pis.append(row_ask)
+
+        res = pd.DataFrame(pis)
+        return res
+
+    @property
+    def get_table(self):
+        pairs = self.get_pair_table(interval_equals=True,
+                                    pos_exists=True,
+                                    fr_mgmt=True)
+        if pairs.empty:
+            return pairs
+
+        pairs['diff'] = -pairs['diff']
+        pairs['ER'] = pairs['diff'] + pairs['pi']
+
+        pairs = pairs[['ticker',
+                       'exch1', 'exch2',
+                       'time1', 'interval1',
+                       'pos1', 'pos2', 'tm',
+                       'ER']]
+        res = pairs.sort_values(by='ER', ascending=False)
+
+        res = res.rename(columns={'time1': 't', 'interval1': 'int'})
+
+        today = pd.Timestamp.now(tz=self.tz).normalize()
+
+        def format_timestamp(ts):
+            ts = pd.to_datetime(ts, errors='coerce')
+            if pd.isna(ts):
+                return ""
+            if ts.tzinfo is None:
+                ts = ts.tz_localize(self.tz)
+            else:
+                ts = ts.tz_convert(self.tz)
+            day_diff = (ts.normalize() - today).days
+            day_str = "T" if day_diff == 0 else f"T+{day_diff}"
+            hour = ts.hour
+            return f"{day_str} / {hour}"
+
+        res['t'] = res['t'].apply(format_timestamp)
+        res = res.set_index('ticker')
+        return res
 
 
 # if __name__ == "__main__":
@@ -235,6 +361,8 @@ class TableViewer:
 #                                         timezone='Asia/Seoul')
 #     funding_table = viewer.get_funding_table(hours_ahead=8,
 #                                              tolerance_minutes=5)
-#     info_table = viewer.get_info_table()
-#     pair_table = viewer.get_pair_table(hours_ahead=8,
-#                                        tolerance_minutes=5)
+#     info_table = viewer.get_info_table
+#     pair_table = viewer.get_pair_table(interval_equals=True,
+#                                        pos_exists=True,
+#                                        fr_mgmt=True)
+#     table = viewer.get_table()
