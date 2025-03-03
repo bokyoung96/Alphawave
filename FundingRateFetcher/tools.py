@@ -1,6 +1,6 @@
 from typing import Optional
 import re
-import math
+import json
 import pytz
 import logging
 import pandas as pd
@@ -14,6 +14,19 @@ logger = logging.getLogger(__name__)
 class Tools:
     def __init__(self):
         pass
+
+    @staticmethod
+    def load_config(file_path: str) -> dict:
+        try:
+            with open(file_path, 'r') as file:
+                config = json.load(file)
+            return config
+        except FileNotFoundError:
+            logging.error(f"Configuration file {file_path} not found.")
+            return {}
+        except json.JSONDecodeError:
+            logging.error("Error decoding JSON from the configuration file.")
+            return {}
 
     @staticmethod
     def convert_timestamp_to_kst(ts) -> datetime:

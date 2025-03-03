@@ -1,17 +1,20 @@
-import json
 import logging
-import pandas as pd
-import pytz
-import html
-from datetime import datetime, timedelta
+import datetime
+import asyncio
 
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
+    CallbackQueryHandler
 )
 
+from tools import Tools
 from exchange import ExchangeManager
 from pipeline import PipelineMerger
 from table import TableViewer
@@ -21,21 +24,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-
-def load_config(file_path):
-    try:
-        with open(file_path, 'r') as file:
-            config = json.load(file)
-        return config
-    except FileNotFoundError:
-        logging.error(f"Configuration file {file_path} not found.")
-        return {}
-    except json.JSONDecodeError:
-        logging.error("Error decoding JSON from the configuration file.")
-        return {}
-
-
-config = load_config("config.json")
+config = Tools.load_config("config.json")
 alphawave_bot = config.get("alphawave_bot_token")
 alphawave_group_chat_id = config.get("alphawave_group_chat_id")
 
@@ -54,20 +43,30 @@ def create_viewer(**kwargs) -> TableViewer:
     )
 
 
-def chunk_text(text: str, chunk_size: int = 4000):
-    for i in range(0, len(text), chunk_size):
-        sub = text[i:i+chunk_size]
-        if len(sub.strip()) == 0:
-            continue
-        yield sub
+def escape_md(text: str) -> str:
+    text = text.replace("\\", "\\\\")
+    text = text.replace("`", "\\`")
+    text = text.replace("_", "\\_")
+    return text
 
 
 async def do_update(context: ContextTypes.DEFAULT_TYPE):
     logging.info(
         "Updating data (ExchangeManager -> PipelineMerger -> TableViewer) ...")
-    viewer = create_viewer()
+    viewer = await asyncio.to_thread(create_viewer)
     context.application.bot_data["viewer"] = viewer
     logging.info("Update done.")
+
+
+async def job_update(context: ContextTypes.DEFAULT_TYPE):
+    await do_update(context)
+    next_run = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    msg = f"Updating: estimated: {next_run.strftime('%Y-%m-%d %H:%M:%S')}"
+    await context.bot.send_message(
+        chat_id=alphawave_group_chat_id,
+        text=msg
+    )
+    logging.info(msg)
 
 
 async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -78,23 +77,13 @@ async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def job_update(context: ContextTypes.DEFAULT_TYPE):
-    await do_update(context)
-    await context.bot.send_message(
-        chat_id=alphawave_group_chat_id,
-        text="Data has been updated automatically."
-    )
-
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = (
-        "Hello! The following commands are:\n"
-        "/info - Show info table\n"
-        "/fund - Show funding table\n"
+        "Hello! Available commands:\n"
+        "/table - Show table (ticker/exch1/exch2/ER) with details on click\n"
         "/update - Manually re-load data\n"
-        "/help - Show usage instructions\n"
-        "/table - Show table\n\n"
-        "(All messages will be sent to this group.)"
+        "/help - Show usage instructions\n\n"
+        "Data automatically updates every 1 minute."
     )
     await context.bot.send_message(
         chat_id=alphawave_group_chat_id,
@@ -105,12 +94,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Command Reference:\n"
-        "/start - Basic greeting\n"
-        "/info - Retrieves the info table\n"
-        "/fund - Retrieves the funding table\n"
+        "/table - Retrieves simplified table. Click ticker/exch1/exch2 for details.\n"
         "/update - Forces an immediate data update\n"
-        "/help - Displays this help message\n\n"
-        "The data is automatically updated every hour, 3 minutes before the hour (HH:57 KST)."
+        "/help - Displays help message\n\n"
+        "Data automatically updates every 1 minute."
     )
     await context.bot.send_message(
         chat_id=alphawave_group_chat_id,
@@ -118,76 +105,135 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    viewer: TableViewer = context.bot_data["viewer"]
-    df = viewer.get_info_table
-    table_str = df.to_markdown(index=True, tablefmt="pipe")
-    escaped_str = html.escape(table_str)
-    for chunk in chunk_text(escaped_str, 3000):
-        msg = f"<pre>{chunk}</pre>"
+async def cmd_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_table(context)
+
+
+async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("DETAIL|"):
+        return
+
+    row_idx_str = data.split("|")[1]
+    try:
+        row_idx = int(row_idx_str)
+    except ValueError:
         await context.bot.send_message(
             chat_id=alphawave_group_chat_id,
-            text=msg,
-            parse_mode="HTML"
+            text=f"Invalid row index: {row_idx_str}"
         )
+        return
+
+    viewer: TableViewer = context.bot_data.get("viewer")
+    if not viewer:
+        await do_update(context)
+        viewer = context.bot_data["viewer"]
+
+    df = viewer.get_table
+    df.reset_index(drop=True, inplace=True)
+
+    if row_idx < 0 or row_idx >= len(df):
+        await context.bot.send_message(
+            chat_id=alphawave_group_chat_id,
+            text=f"Row index out of range: {row_idx}"
+        )
+        return
+
+    row_df = df.iloc[[row_idx]].copy()
+    detail_str = row_df.to_markdown(tablefmt="pipe", index=False)
+    detail = escape_md(detail_str)
+    msg_detail = f"```\n{detail}\n```"
+
+    await context.bot.send_message(
+        chat_id=alphawave_group_chat_id,
+        text=msg_detail,
+        parse_mode="Markdown"
+    )
 
 
-async def cmd_fund(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    viewer: TableViewer = context.bot_data["viewer"]
-    df = viewer.get_funding_table(hours_ahead=8, tolerance_minutes=30)
+async def send_table(context: ContextTypes.DEFAULT_TYPE):
+    viewer: TableViewer = context.bot_data.get("viewer")
+    if not viewer:
+        await do_update(context)
+        viewer = context.bot_data["viewer"]
+
+    df = viewer.get_table
     if df.empty:
         await context.bot.send_message(
             chat_id=alphawave_group_chat_id,
-            text="=== Funding Table is empty ==="
+            text="=== Table is empty ==="
         )
         return
-    table_str = df.to_markdown(index=True, tablefmt="pipe")
-    escaped_str = html.escape(table_str)
-    for chunk in chunk_text(escaped_str, 3000):
-        msg = f"<pre>{chunk}</pre>"
-        await context.bot.send_message(
-            chat_id=alphawave_group_chat_id,
-            text=msg,
-            parse_mode="HTML"
-        )
+
+    df.reset_index(drop=False, inplace=True)
+    df_msg = df.head(10).copy()
+    cols = ["ticker", "exch1", "exch2", "ER"]
+    df_msg = df_msg[cols]
+
+    if "ER" in df_msg.columns:
+        df_msg["ER"] = df_msg["ER"].round(4)
+
+    table_str = df_msg.to_markdown(tablefmt="pipe", index=False)
+    table = escape_md(table_str)
+    msg = f"```\n{table}\n```"
+
+    buttons = []
+    for idx, row in df_msg.iterrows():
+        ticker = str(row.get("ticker", ""))
+        exch1 = str(row.get("exch1", ""))
+        exch2 = str(row.get("exch2", ""))
+        button = f"{ticker} / {exch1} / {exch2}"
+        callback_data = f"DETAIL|{idx}"
+        buttons.append([
+            InlineKeyboardButton(
+                text=button,
+                callback_data=callback_data
+            )
+        ])
+    reply_markup = InlineKeyboardMarkup(buttons)
+
+    await context.bot.send_message(
+        chat_id=alphawave_group_chat_id,
+        text=msg,
+        parse_mode="Markdown",
+        reply_markup=reply_markup
+    )
 
 
-async def cmd_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    viewer = create_viewer()
-    df = viewer.get_table.head(10)
-    table_str = df.to_markdown(index=True, tablefmt="pipe")
-    escaped_str = html.escape(table_str)
-    for chunk in chunk_text(escaped_str, 3000):
-        msg = f"<pre>{chunk}</pre>"
-        await context.bot.send_message(
-            chat_id=alphawave_group_chat_id,
-            text=msg,
-            parse_mode="HTML"
-        )
+async def job_table(context: ContextTypes.DEFAULT_TYPE):
+    await do_update(context)
+    await send_table(context)
+    next_run = datetime.datetime.now() + datetime.timedelta(minutes=1)
+    logging.info(
+        f"Updating: estimated: {next_run.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 def main():
+    app = ApplicationBuilder().token(alphawave_bot).build()
+
     viewer = create_viewer()
-    application = ApplicationBuilder().token(alphawave_bot).build()
-    application.bot_data["viewer"] = viewer
+    app.bot_data["viewer"] = viewer
 
-    application.add_handler(CommandHandler("start", cmd_start))
-    application.add_handler(CommandHandler("info", cmd_info))
-    application.add_handler(CommandHandler("fund", cmd_fund))
-    application.add_handler(CommandHandler("table", cmd_table))
-    application.add_handler(CommandHandler("help", cmd_help))
-    application.add_handler(CommandHandler("update", cmd_update))
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("update", cmd_update))
+    app.add_handler(CommandHandler("table", cmd_table))
+    app.add_handler(CallbackQueryHandler(detail_callback))
 
-    tz_seoul = pytz.timezone("Asia/Seoul")
-    now = datetime.now(tz_seoul)
-    target = now.replace(minute=57, second=0, microsecond=0)
-    if now >= target:
-        target += timedelta(hours=1)
-    first_delay = (target - now).total_seconds()
-    job_queue = application.job_queue
-    job_queue.run_repeating(job_update, interval=3600, first=first_delay)
+    job_queue = app.job_queue
 
-    application.run_polling()
+    now = datetime.datetime.now()
+    next_minute = now.replace(second=0, microsecond=0) + \
+        datetime.timedelta(minutes=1)
+    first_delay = (next_minute - now).total_seconds()
+
+    job_queue.run_repeating(job_update, interval=60, first=first_delay)
+    job_queue.run_repeating(job_table, interval=60, first=first_delay)
+
+    app.run_polling()
 
 
 if __name__ == "__main__":
