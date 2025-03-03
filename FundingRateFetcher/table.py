@@ -290,8 +290,8 @@ class TableViewer:
 
             # NOTE: Long maker, Short taker (LmSt)
             try:
-                eff_l_bid = long_leg['bid'] * (1 + long_leg['maker'])
-                eff_s_bid = short_leg['bid'] * (1 + short_leg['taker'])
+                eff_l_bid = long_leg['bid'] * (1 - long_leg['maker'])
+                eff_s_bid = short_leg['bid'] * (1 - short_leg['taker'])
                 pi_bid = (eff_s_bid - eff_l_bid) / eff_l_bid
             except Exception:
                 pi_bid = np.nan
@@ -331,7 +331,7 @@ class TableViewer:
                        'exch1', 'exch2',
                        'time1', 'interval1',
                        'pos1', 'pos2', 'tm',
-                       'ER']]
+                       'diff', 'ER']]
         res = pairs.sort_values(by='ER', ascending=False)
 
         res = res.rename(columns={'time1': 't', 'interval1': 'int'})

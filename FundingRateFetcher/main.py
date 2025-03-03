@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     viewer = run()
     print("=== Info Table ===")
-    print(viewer.get_info_table())
+    print(viewer.get_info_table)
     print("=== Funding Table ===")
     print(viewer.get_funding_table(hours_ahead=8, tolerance_minutes=30))
     print("=== Pair Table ===")
