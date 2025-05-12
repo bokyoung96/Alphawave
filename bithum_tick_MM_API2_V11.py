@@ -16,6 +16,7 @@ import pandas as pd
 import threading
 import signal
 import math
+import numpy as np
 
 # Windows에서 SelectorEventLoop 사용
 if platform.system() == 'Windows':
@@ -24,6 +25,7 @@ if platform.system() == 'Windows':
 
 # 전역 변수로 잔고 정보 저장
 current_balances = {}
+current_unexecuted_quantity = {} # 예시 {('KRW-KAITO', 1840): 0.0025}
 
 # ctrl+c로 웹소켓 종료하기 위한 코드 
 current_ws = None
@@ -96,6 +98,7 @@ def on_message(ws, message, trading_params):
             data_handled = json.dumps(data, indent=2)
             print(data_handled)
             
+            # 매수 체결 시 매도 주문 실행
             if (data.get("ask_bid") == "BID") & ((data.get("state") == "trade") or (data.get("state") == "done")):
                 market = data.get("code")
                 market_params = trading_params.get(market, trading_params['default'])
@@ -154,6 +157,71 @@ def on_message(ws, message, trading_params):
                     else:
                         print(f"[{get_timestamp_now()}] Balance is insufficient. Skipping sell order.")
 
+            # 매도 체결 시 매수 주문 실행
+            elif (data.get("ask_bid") == "ASK") & ((data.get("state") == "trade") or (data.get("state") == "done")):
+                market = data.get("code")
+                market_params = trading_params.get(market, trading_params['default'])
+                market_BasisPlus = market_params['BasisPlus']
+                buy_price = math.floor(float(data.get("price")) * (1 - market_BasisPlus/10000))
+                executed_funds = float(data.get("executed_funds"))
+                executing_volume = np.floor(executed_funds/buy_price*10000)/10000
+
+                if (executed_funds >= 5000):
+                    print(f"[{get_timestamp_now()}] Sell order executed. Placing buy order: "
+                          f"Market={market}, Price={buy_price}, Volume={executing_volume}")
+                    
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        result = loop.run_until_complete(
+                            place_order(
+                                market=market,
+                                side='bid',
+                                order_type='limit',
+                                price=buy_price,
+                                volume=executing_volume
+                            )
+                        )
+                        if result:
+                            print(f"[{get_timestamp_now()}] Buy order for executed volume sent")
+                        else:
+                            print(f"[{get_timestamp_now()}] Failed to place buy order")
+                    except Exception as e:
+                        print(f"[{get_timestamp_now()}] Error placing buy order: {str(e)}")
+                    finally:
+                        loop.close()
+                else:
+                    print(f"[{get_timestamp_now()}] Transaction Value not exceeding 5000 KRW. Checking unexcecuted quantity.")
+                    ticker_price_tuple = (market, buy_price)
+                    try:
+                        current_unexecuted_quantity[ticker_price_tuple] = current_unexecuted_quantity[ticker_price_tuple]+ executing_volume
+                    except:
+                        current_unexecuted_quantity[ticker_price_tuple] = executing_volume
+                    if (buy_price * current_unexecuted_quantity[ticker_price_tuple]) >= 5000:
+                        print(f"[{get_timestamp_now()}] unexcecuted quantity is sufficient. Placing buy order."
+                              f"Market={market}, Price={buy_price}, Volume={current_unexecuted_quantity[ticker_price_tuple]}")
+                        
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            result = loop.run_until_complete(
+                                place_order(
+                                    market=market,
+                                    side='bid',
+                                    order_type='limit',
+                                    price=buy_price,
+                                    volume=current_unexecuted_quantity[ticker_price_tuple]
+                                )
+                            )
+                            current_unexecuted_quantity[ticker_price_tuple] = 0
+                            if result:
+                                print(f"[{get_timestamp_now()}] Buy order for unexcecuted quantity sent")
+                        except Exception as e:
+                            print(f"[{get_timestamp_now()}] Error placing buy order: {str(e)}")
+                        finally:
+                            loop.close()
+                        
+
         elif data.get("type") == "myAsset":
             print(f"[{get_timestamp_now()}] Received myAsset data:")
             data_assets = data.get("assets")[0]
@@ -207,7 +275,7 @@ async def run_websocket(trading_params):
 
     def run_ws_loop(ws):
         try:
-            ws.run_forever(ping_interval=30, ping_timeout=10)
+            ws.run_forever(ping_interval=45, ping_timeout=40)
         except Exception as e:
             print(f"[{get_timestamp_now()}] WebSocket loop error: {str(e)}")
         finally:
@@ -263,35 +331,43 @@ async def main():
             'default': {
                 'BasisPlus': 16,
             },
-            'KRW-SUI': {
-                'BasisPlus': 11,
-                'VOLUME': 0,
-                'PRICE': 4700
-            },
+            # 'KRW-KAITO': {
+            #     'BasisPlus': 16,
+            #     'VOLUME': 100,
+            #     'PRICE': 1840
+            # },                                                                                                                                             
+            # 'KRW-MOODENG': {
+            #     'BasisPlus': 16,
+            #     'VOLUME': 100,
+            #     'PRICE': 200
+            # },            
         }
 
         ws = await run_websocket(TRADING_PARAMS)
         if ws is None:
             print(f"[{get_timestamp_now()}] Failed to establish WebSocket connection. Exiting.")
             return
-        
-        await asyncio.sleep(2)
-        print(f"[{get_timestamp_now()}] Placing multiple orders in parallel...")
-        
-        order_tasks = []
-        for market, params in dict(list(TRADING_PARAMS.items())[1:]).items():
-            order_tasks.append(
-                place_order(
-                    market=market,
-                    side='bid',
-                    order_type='limit',
-                    price=params['PRICE'],
-                    volume=params['VOLUME']
+        if len(TRADING_PARAMS.items()) <= 1:
+            print(f"[{get_timestamp_now()}] No orders to execute, start monitoring orders.")
+
+        else:
+            await asyncio.sleep(2)
+            print(f"[{get_timestamp_now()}] Placing multiple orders in parallel...")
+            
+            order_tasks = []
+            for market, params in dict(list(TRADING_PARAMS.items())[1:]).items():
+                order_tasks.append(
+                    place_order(
+                        market=market,
+                        side='bid',
+                        order_type='limit',
+                        price=params['PRICE'],
+                        volume=params['VOLUME']
+                    )
                 )
-            )
-        
-        await asyncio.gather(*order_tasks)
-        print(f"[{get_timestamp_now()}] All orders placed.")
+            
+            await asyncio.gather(*order_tasks)
+            print(f"[{get_timestamp_now()}] All orders placed.")
 
         while getattr(ws, 'connected', False):
             await asyncio.sleep(2)
@@ -301,4 +377,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
