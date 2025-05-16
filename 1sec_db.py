@@ -36,10 +36,24 @@ class OHLCVCollector:
         
     def update_candle(self, price: float, volume: float, timestamp: int):
         """현재 캔들 데이터 업데이트"""
+        # 타임스탬프를 초 단위로 정규화
+        normalized_timestamp = timestamp - (timestamp % 1)
+        
         if self.current_candle['timestamp'] is None:
             # 새로운 캔들 시작
             self.current_candle = {
-                'timestamp': timestamp,
+                'timestamp': normalized_timestamp,
+                'open': price,
+                'high': price,
+                'low': price,
+                'close': price,
+                'volume': volume
+            }
+        elif normalized_timestamp > self.current_candle['timestamp']:
+            # 새로운 초가 시작되면 이전 캔들 저장하고 새로운 캔들 시작
+            self.save_candle()
+            self.current_candle = {
+                'timestamp': normalized_timestamp,
                 'open': price,
                 'high': price,
                 'low': price,
@@ -78,6 +92,15 @@ class OHLCVCollector:
         conn.commit()
         conn.close()
         
+        # 캔들 데이터 출력 (UTC+0)
+        utc_time = datetime.utcfromtimestamp(self.current_candle['timestamp'])
+        print(f"\n=== 1초봉 캔들 저장 (UTC+0: {utc_time}) ===")
+        print(f"시가: {self.current_candle['open']:.8f}")
+        print(f"고가: {self.current_candle['high']:.8f}")
+        print(f"저가: {self.current_candle['low']:.8f}")
+        print(f"종가: {self.current_candle['close']:.8f}")
+        print(f"거래량: {self.current_candle['volume']:.8f}")
+        
         # 새로운 캔들 준비
         self.current_candle = defaultdict(float)
         self.current_candle['timestamp'] = None
@@ -95,7 +118,6 @@ async def collect_ohlcv(symbol: str):
     
     try:
         print(f"{symbol} 1초봉 데이터 수집을 시작합니다...")
-        last_save_time = None
         
         while True:
             try:
@@ -104,12 +126,6 @@ async def collect_ohlcv(symbol: str):
                 if not trades:
                     continue
                 
-                current_time = int(time.time())
-                
-                # 새로운 초가 시작되면 이전 캔들 저장
-                if last_save_time is not None and current_time > last_save_time:
-                    collector.save_candle()
-                
                 # 현재 거래로 캔들 업데이트
                 for trade in trades:
                     price = float(trade['price'])
@@ -117,7 +133,6 @@ async def collect_ohlcv(symbol: str):
                     timestamp = int(trade['timestamp'] / 1000)  # 밀리초를 초로 변환
                     
                     collector.update_candle(price, volume, timestamp)
-                    last_save_time = timestamp
                 
             except Exception as e:
                 print(f"에러 발생: {str(e)}")

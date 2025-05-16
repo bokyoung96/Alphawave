@@ -31,6 +31,7 @@ async def monitor_returns(symbol: str, span: int = 5):
             try:
                 # 웹소켓으로 실시간 거래 구독
                 trades = await exchange.watch_trades(symbol)
+                print(trades)
                 if not trades:
                     continue
                     
